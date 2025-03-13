@@ -6,9 +6,10 @@ This is the security document for the [zkBTC decentralized bridge](https://zkbtc
 
 zkBTC is a ZKP-based bridge to securely bridge Bitcoin to Ethereum, and then all other major L1s and L2s. The basic workflow are:
 
-* Deposit - user sends some $BTC to a designated operator address. Such a transaction is proved and the proof is verified in an Ethereum smart contract. After successful verification, the smart contract mints $zkBTC tokens, and transfers these tokens to the address supplied along with the deposit (in a `OP_RETURN` output).
+* Deposit - user sends some $BTC to a designated operator address. Such a transaction is proved and the proof is verified in an Ethereum smart contract. After successful verification, the smart contract mints $zkBTC tokens, and transfers these tokens to the address supplied along with the deposit (in a `OP_RETURN` output). The newly created UTXOs from this deposit will be managed by the smart contract. The miner which computes the proof and submit on user's behalf will be rewarded.
 * Use - users can use $zkBTC tokens any way they wish for, and the $zkBTC tokens are equivalent to $BTC in the Ethereum ecosystem.
-* Redemption - user calls an Ethereum smart contract function to burn some $zkBTC tokens. The function will also leave some transaction logs specifying which available UTXOs to be spent. 
+* Redemption - user calls an Ethereum smart contract function to burn some $zkBTC tokens. The function will also leave some transaction logs specifying which available UTXOs to be spent. Specifically, the smart contract will choose which UTXOs to be spend this time, and record related information in the logs. Miner reward is delayed.
+* Change and miner reward. The bring back the change UTXO and to reward the miner which computes proof for redemption, another proof about the redemption transactioin in Bitcoin could be provided to the smart contract.
 
 For more information and general use, please checkout our [Gitbook](https://lightec.gitbook.io/lightecxyz).
 
@@ -100,7 +101,6 @@ zkBTC is designed to be fully decentralized, so there is no central role to oper
 
 
 ## Securing Deposits
-
 
 ### Defense in Depth - Overall Design
 
