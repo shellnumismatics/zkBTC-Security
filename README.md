@@ -239,6 +239,12 @@ In the discussion so far, the signature to the chain tip has become the single p
 
 Our current practice is to double the depth requirements, and update the allowance value accordingly. This is on top of the depth requirement escalation mentioned earlier.
 
+With this design, we have two new depth requirements: (D, allowance) = (48, 15), (72, 19). And the hashing power requirements for the attacker are:
+```golang
+    // x >= 4800/(15 + 48 + 12) = 64.0
+    // x >= 7200/(19 + 72 + 12) = 69.9
+```
+
 ## Securing Redemption
 
 
