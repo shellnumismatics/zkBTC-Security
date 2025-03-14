@@ -19,7 +19,7 @@ Before `OP_ZKP` could be realized, we also have an alternative solution, that is
 
 * each platform is designed to safekeep the private key in a way that it is nearly impossible to learn the content of the private key;
 * each platform only signs the redemption transaction after a successful ZKP verificatioin;
-* we can tolerate one of the platforms to be craked or failed without losing security or losing assets.
+* we can tolerate one of the platforms to be craked or fail without losing security or losing assets.
 
 Please turn to later sections for more details.
 
@@ -96,6 +96,8 @@ We realize that single factor defense might attract potential adversaries. There
 ### Security over UX
 
 zkBTC is designed to be fully decentralized, so there is no central role to operate the risk parameters. We have to assume worst case and defend zkBTC against such. Therefore the UX has to yield in case there is a conflict. For example, we require each Bitcoin deposit transaction to have a confirmation depth of at least 9, instead of 6. Throughout this document there are many more such examples.
+
+Third party services could kick in to enhance UX, since zkBTC is designed to be full decentralized. The basic idea here is for the third party service to deposit to the zkBTC system and obtain some zkBTC tokens, and later provide those tokens to users with better UX. Of course, third parties are free to define their own business models. 
 
 ## Audit Reports
 
@@ -250,23 +252,55 @@ With this design, we have two new depth requirements: (D, allowance) = (48, 15),
 
 ### The Ethereum Light Client Protocol
 
+We use the Ethereum Light Client Protocol (LCP) to determine if the transaction to call the designated redeem function has completed successfully and that the enclosing block has been finalized. This includes below major parts:
+
+* the transaction to call the designated redeem function has completed successfully and left some logs as receipts;
+* the transaction belongs to a block;
+* the block is an ancestor of another block, which has been finalized as being signed off by a sync committee;
+* there exists a signature chain from the genesis sysc committee to the signing sync committee;
+
+By proving the above assertions, we are sure that the redeem function has been executed as expected, then we can extract data from the proven logs, assemble a Bitcoin transaction and send it along with the proof to be verified and signed/executed. Note that all the information needed to assemble the Bitcoin transaction are managed with the smart contract, including all the available UTXOs. 
 
 ### opZKP
 
+Our long term plan is to have Bitcoin upgraded to support [`OP_ZKP`](https://github.com/opzkp/tea-horse). Then we can supply the transaction (inputs, outputs) and its (segregated) witness (proof) to Bitcoin. The proof serves as the spending conditions of the input UTXOs, much like a signature in a regular Bitcoin transfer transaction. Once the verification is successful, the Bitcoin network can process the transaction, and user will get the redeemed $BTC.
 
 ### MultiSig Design
 
+The interim solution is to use two-of-three multi-sig scheme. As mentioned in the beginning of this document, we need multiple safe platforms to manage private keys such that:
 
-### ICP tECDSA Security
+* each platform is designed to safekeep the private key in a way that it is nearly impossible to learn the content of the private key;
+* each platform only signs the redemption transaction after a successful ZKP verificatioin;
+* we can tolerate one of the platforms to be craked or fail without losing security or losing assets.
 
+And our choices are:
 
-### SGX and Oasis
+* ICP [tECDSA](https://internetcomputer.org/docs/references/t-sigs-how-it-works/), available in a canister, which is programmed to verify a proof before signing the transaction. And the private key is never reconstructed during signing. 
+* Oasis [Sapphire](https://oasisprotocol.org/sapphire), an EVM compatible L1 based on TEE technology. The Intel SGX technology used in Oasis Sapphire can protect both the private key and the integrity of the enclave code, so that no one can bypass the proof verification placed before transaction signing.
+* Intel SGX-enabled machines, similar to Oasis Sapphire, but are operated by the Lightec team. SGX technology ensures that even the Lightec team cannot learn the private key content or bypass the "proof-verfication-before-signature" logic.
 
+Interested readers may refer to ICP or Oasis documents for security related information. We will cover how we program and operate the SGX enclave.
+
+### Security of Applying SGX
+
+For a general introduction of SGX especially about how it could secure computation, we recommend the classic paper [Intel SGX Explained](https://eprint.iacr.org/2016/086.pdf) by Victor Costan and Srinivas Devadas. 
+
+In a nutshell, an SGX enclave provides:
+
+* encrypted memory content which could be decrypted only inside the CPU and visible to its owning enclave, preventing priveledge OS processes or even hardware systems (BIOS, memory controller, etc.) from accessing the confidential data;
+* program integrity such that once the program is tampered with, it is either an invalid enclave or a totally different enclave. In either case, it cannot decrypt any data encrypted by the original enclave.
+
+We are building on top of [ego](https://github.com/edgelesssys/ego), a popular Golang library to use SGX. The enclave verifies a zero knowledge proof of a redemption transaction before signing the Bitcoin transaction with a private key it manages. The private key is initially generated by the first instance of enclave, then exported encrypted such that only itself or another enclave with the exact binary code could decrypt inside the enclave. Put it another way, even the Lightec team cannot read the content of the private key, or bypass the zkp verification step to obtain a signature.
+
+Our SGX code will be open once we complete the audit and launch the product.
 
 ## chainark
 
 
 ## System Upgradability
+
+
+## Responsible Disclosure
 
 
 ## Open Source Plan
