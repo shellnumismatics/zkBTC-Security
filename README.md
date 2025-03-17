@@ -249,7 +249,6 @@ With this design, we have two new depth requirements: (D, allowance) = (48, 15),
 
 ## Securing Redemption
 
-
 ### The Ethereum Light Client Protocol
 
 We use the Ethereum Light Client Protocol (LCP) to determine if the transaction to call the designated redeem function has completed successfully and that the enclosing block has been finalized. This includes below major parts:
@@ -294,8 +293,22 @@ We are building on top of [ego](https://github.com/edgelesssys/ego), a popular G
 
 Our SGX code will be open once we complete the audit and launch the product.
 
+### The BLS Signature Verification for BLS12-381 G2
+
+The Ethereum Light Client Protocol requires this. As related library is not available when we started to develop zkBTC, we developed such circuit on our own and we had submitted a [PR to gnark](https://github.com/Consensys/gnark/pull/1040), pending audit, review and merge.
+
 ## chainark
 
+In both deposit and redemption, we need to prove a chain of relationship: for Bitcoin the blocks are chained with double SHA256, for Ethereum Light Client Prototol the sync committees are chains with BLS signature, etc. We developed [chainark](https://github.com/lightec-xyz/chainark) to prove a kind of chained relationship. Basically:
+
+* a `UnitCircuit` is a user-defined circuit that makes up the chaining;
+* a `RecursiveCircuit` either verifies two `UnitCircuit` proofs or one `RecursiveCircuit` or `HybridCircuit` proof immediately followed by a `UnitCircuit` proof;
+* a `HybridCircuit` is similar to `RecursiveCircuit` but instead of a `UnitCircuit` proof, it verifies the chaining conditions directly. The benefits of `HybridCircuit` over `RecursiveCircuit` is saving a recursion.
+
+The security of chainark is therefore of essential importance to zkBTC. Here are main design consideratioins:
+
+* Circuit `FingerPrint` is used throughout the chainark library to identify circuits. Unlike some simple situation that an outer circuit verifies a proof from an inner circuit and it only needs the in-circuit verification key, we design the chainark to be capable of verifying a chain of any length. So the basic idea is for the `RecursiveCircuit` or `HybridCircuit` to also verify their own proof (from an earlier proving session). Of course they cannot use a verification key when its definition has not yet finished. `FingerPrint` is the answer to this dilemma. In the source code, this is the `MultiRecursiveCircuit.SelfFps` or `HybridCircuit.SelfFps` (an array).
+* For any circuit to verify if a proof from the `RecursiveCircuit` or `HybridCircuit` is acceptable or not, they need not only verify the proof with a proper vereification key, but also check if the recursion has been performed correctly. That is, the verification keys used to in-circuit verify other proofs must match to the listed finger prints exactly one-to-one. These listed finger prints are used to identify which recursive or hybird circuit could be trusted.
 
 ## System Upgradability
 
