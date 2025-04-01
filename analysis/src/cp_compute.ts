@@ -25,7 +25,7 @@ async function main(displacement:number=0, dataPath:string="analysis/data/header
     let okaydiff = 0;
     let gooddiff = 0;
     let successes:number[] = new Array(2017).fill(0);
-    let blocknum_base = i - 3017 - displacement;
+    let blocknum_base = i - 1000 - displacement;
     let allowance = 0;
     for (let index = 0; index < 1000; index++) {
         let blocknum = blocknum_base + index 
