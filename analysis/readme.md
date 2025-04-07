@@ -7,9 +7,11 @@ $ npm run main
 ```
 
 ## Note
-It is recommended to pipe data to a file. The terminal output may be become truncated.
+It is recommended to pipe data to a file, otherwise the terminal output may be become truncated.
 
-## Task 1 : Compute Transaction pass probability depending on checkpoint depth
+## Computing Checkpoint liveness 
+Evaluates whether a checkpoint will accept a transaction downstream eventually, up to a set amount of blocks (defaults to 2016 blocks, or approximately 14 days). 
 ```
-$ npm tsc && npx tsx analysis/src/cp_compute.ts [data_dispacement] [alternate_data_file_path]
+npx tsc
+node dist/analysis/src/cp_compute_all.js [maximum blocks]
 ```
