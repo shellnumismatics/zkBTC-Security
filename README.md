@@ -171,6 +171,12 @@ Although the in-circuit check is a strong defense, we could still discuss this h
 
 Note that `better_estimation` is unknown to the smart contract and is used here simply to clarify this text.
 
+#### Free Depth from Consensus
+
+There is another source of *free* depth besides what we have discussed so far. If there are lots of new mining power joining the game, the average block interval could be greatly shrunk.
+
+Let's discuss a concrete yet hypothetical case, that after a checkpoint is selected only a few blocks after a new mining difficulty had been settled. Immediately after the checkpoint selectioin, some mining power joins the game just to drive the average block time to below 8 minutes instead of 10. 20 hours later, the main-net generates 150 new blocks intead of 120. The excessive 30 new blocks give the adversary a huge boost.
+
 #### Putting Everything Together
 
 We need to find out the threshold of hashing power that an adversary must command in order to defeat our checkpoint system. Given:
@@ -308,7 +314,7 @@ The server should create the secret only once, and [seal](https://pkg.go.dev/git
 Once the TLS connection is established, the secret exchange process follows these steps:
 
 A. Client Generates an SGX Remote Attestation Report
-1.	The client generates a Secp256k1 key pair, again with the private key being `privateKey := SHA256(SHA256(UniqueKey))`. Note that this might fail with a very small chance and this is acceptable in our use. There are multiple ways to workaround it that we will not cover here.
+1.	The client generates a Secp256k1 key pair, again with the private key being `privateKey := SHA256(SHA256(UniqueKey))`. Note that this might fail with a negleble chance (less than $2^{-127}$), which is acceptable in our use.
 2.	The public key is used as a parameter [to generate an SGX Remote Attestation Report](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/enclave#GetRemoteReport).
 3.	The client sends the SGX report to the server.
 
