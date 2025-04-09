@@ -177,6 +177,11 @@ There is another source of *free* depth besides what we have discussed so far. I
 
 Let's discuss a concrete yet hypothetical case, that after a checkpoint is selected only a few blocks after a new mining difficulty had been settled. Immediately after the checkpoint selectioin, some mining power joins the game just to drive the average block time to below 8 minutes instead of 10. 20 hours later, the main-net generates 150 new blocks intead of 120. The excessive 30 new blocks give the adversary a huge boost.
 
+Our solution is to derive the actual average block interval from the block data, and prove it with the zkp circuit. Then the smart contract may check the proven block interval carefully and decide that:
+
+* if the proven interval is shorter than 10 minutes, use it to estimate the checkpoint depth;
+* otherwise, keep using the 10-minutes interval.
+
 #### Putting Everything Together
 
 We need to find out the threshold of hashing power that an adversary must command in order to defeat our checkpoint system. Given:
