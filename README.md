@@ -114,6 +114,206 @@ We have designed three defenses against potential attacks, layered in depth:
 
 Now, assuming some potent attacker commanding lots of hashing power has already cracked the first defense, the decentralized roles to sign off the chain tip. It still has to manage enough checkpoint depth. The attacker won't be able to meet both the `Transaction Depth` requirement and the `CheckPoint Depth` requirement if we set proper checking rules in the smart contract. Before discussing any specific rules, we must point out the obvious: it is impossible to pass all legit blocks without passing some offending blocks if the adversary indeed masters too much hashing power. Our aim here is not to reject all offending blocks but to make it as computation-intensive as possible for adversaries, such that attacking us is not economically desirable.
 
+### Circuits Diagrms
+
+#### depth circuits
+
+depth circuits proves that BlockM is ancestor of BlockN, and prove that the depth from BlockM to BlockN is n-m.
+
+**note:** The minimum depth of tx is 9, and the minimum depth of cp is 72
+
+These circuits includes 2 groups external circuits:
+
+* `BlockBulkCircuit`, prove hat when the depth is 9-24 or 72.
+* `RecursiveBulksCircuit`,  prove that when the depth is > 24. RecursiveBulksCircuit is based on the BlockBulkCircuit proof with a depth of 24 or 72, and then absorbs a depth of 1-9, 18, 36, or 72, repeatedly recursing on itself.
+
+![depths](docs/depths.drawio.svg)
+
+```mermaid
+---
+title: Depth circuits of code implement
+---
+
+classDiagram
+
+class RecursiveBulksCircuit{
+    +HybridCircuit
+    +Depth
+}
+
+class HybridCircuit["chainark.HybridCircuit"]{
+    +FirstProof
+    +SecondComp UnitCore
+}
+
+RecursiveBulksCircuit *-- HybridCircuit : Embedding
+SecondComp <|-- DepthCore : implements
+
+FirstProof "1" ..> "0..1" BlockBulkCircuit : Dependency
+FirstProof "1" ..> "0..1" RecursiveBulksCircuit : Dependency
+
+HybridCircuit *-- SecondComp : Embedding
+HybridCircuit *-- FirstProof : Embedding
+
+class BlockBulkCircuit{
+    +MultiUnit
+    +BlockHeaders
+    +Depth
+}
+
+BlockBulkCircuit *-- MultiUnit : Embedding
+BlockBulkCircuit <|-- DepthCore : implements
+
+class DepthCore{
+    +BeginHash
+    +EndHash
+    +BlockHeaders
+    +Depth
+    +GetBeginID()
+    +GetEndID()
+    +Define()
+}
+
+class MultiUnit["chainark.MultiUnit"]{
+    +BeginID
+    +EndID
+}
+```
+
+#### BlockChain circuit
+
+BlockChain circuits prove that a chain is formed from genesis block to blockN, and prove that the difficulty adjustment every 2016 blocks meets the rules.
+
+BlockChain circuits are based on chainark. There are 3 auxiliary circuits:
+
+* `BaseLevelCircuit` proves that 112 blocks form a chain, called a batch.
+* `MidLevelCircuit` proves that 6 batches form a chain, each with 112 blocks. Total is 672 blocks, called a super batch.
+* `UpperLevelCircuit` proves that 3 super batches form a chain. Total is 2016 blocks.
+
+Then there are one `BlockChainCircuit` and multiple `BlockChainHybridCircuit`:
+
+* `BlockChainCircuit` combines two existing proofs into one, extending the chain.
+* `BlockChainHybridCircuit(n)` recursively verifies one existing proof (of `BlockChainCircuit` or `BlockChainHybridCircuit`), plus some more blocks to form a chain, effectively extending the chain proven by the existing proof. There are multiple instances: `n := {1, 2, ..., MiniLevel, MiniLevel*2+1, MiniLevel*3+2, MiniLevel*4+3}`. Numbers are chosen to minimize recursive verifications.
+
+Detailed design ![here](docs/blockchain.drawio.svg)
+
+#### tx circuits
+
+tx circuits proves that `deposit` or `redeem` transaction is on-chain and the depth of the tx meets `the minimum tx depth`. The chain is formed from `the genesis block` to `the latest block`, meets the difficulty adjustment rules, and passes through a well-known `checkpoint block`. The genesis block is well known, and the latest block is accepted and signed by a designated `DFinity` canister.
+
+The tx circuits contain other circuit proofs and circuit components:
+
+* `BlockChainProof`, proves that a consensus chain is formed from the genesis block to the latest block.
+* `CpDepthPoof`, proves that the chain passes through the well-known checkpoint block and its depth meets the minimum cp depth.
+* `TxInBlockCircuit` and `TxDepthPoof`, prove that tx is in a block and the depth of the block on the chain meets the minimum tx depth.
+* `EcdsaSigVerif`, proves that the latest block of this chain was accepted and signed by Dfinity.
+* `RedeemInEthProof`, proves that the redeem tx in ETH has been finalized on the ETH chain.
+
+The tx circuits 2 external circuits:
+
+* `DepositTxCircuit`, proves that the deposit tx in BTC has been confirmed by the specified minimum depth on the BTC chain.
+* `RedeemTxCircuit`, proves that the redeem tx in BTC has been confirmed by the specified minimum depth on the BTC chain, and prove that its previous ETH redeem tx is also finalized on the ETH chain.
+
+![txs](docs/txs.drawio.svg)
+
+```mermaid
+---
+title: TxInChain circuits of code implement
+---
+
+classDiagram
+
+RedeemTxCircuit *-- DepositTxCircuit : Embedding
+RedeemTxCircuit *-- RecursiveVerifierCircuit : Embedding
+
+DepositTxCircuit *-- Verifier : Embedding
+DepositTxCircuit *-- EcdsaSigVerif : Embedding
+DepositTxCircuit *-- BlockDepthsCircuit : Embedding
+DepositTxCircuit *-- TxInBlockCircuit : Embedding
+
+class RecursiveVerifierCircuit{
+    +Proof
+}
+
+RecursiveVerifierCircuit "1" ..> "1" `eth.RedeemCircuit` : Dependency
+
+class Verifier["chainark.Verifier"]{
+    +Proof
+}
+
+Verifier "1" ..> "0..1" BlockChainCircuit : Dependency
+Verifier "1" ..> "0..1" BlockChainHybridCircuit : Dependency
+
+class BlockDepthsCircuit{
+    +TxDepthProof
+    +CpDepthProof
+}
+
+BlockDepthsCircuit "1" ..> "0..2" BlockBulkCircuit : Dependency
+BlockDepthsCircuit "1" ..> "0..2" RecursiveBulksCircuit : Dependency
+```
+
+### Circuit Cascading
+
+So the circuits are organized as below (`FP(Circuit)` is short for `FingerPrint(Circuit.Vkey)`):
+
+```
+# for BlockChain circuits
+
+MidLevel.UnitFp   = FP(BaseLevel)
+UpperLevel.UnitFp = FP(MidLevel)
+
+BlockChainHybridCircuit(n) : {1, ..., 18, 37, 56, 75}
+
+BlockChainFpSet :=  {    
+                        FP(BlockChainCircuit), 
+                        FP(BlockChainHybridCircuit(1)), ..., FP(BlockChainHybridCircuit(18)), 
+                        FP(BlockChainHybridCircuit(37)), FP(BlockChainHybridCircuit(56)), FP(BlockChainHybridCircuit(75))
+                    }
+
+BlockChainCircuit.UnitFps          = {FP(BaseLevel), FP(UpperLevel)}
+BlockChainCircuit.SelfFps          = BlockChainFpSet
+
+BlockChainHybridCircuit(n).UnitFps = {FP(UpperLevel)}
+BlockChainHybridCircuit(n).SelfFps = BlockChainFpSet
+
+# for BlockDepth circuits
+
+BlockBulkCircuit(n)      : {9, ..., 24, 72}
+RecursiveBulksCircuit(n) : {1, ..., 18, 36, 72}
+
+BlockBulkFpSet :=       {
+                            FP(BlockBulkCircuit(9)), ..., FP(BlockBulkCircuit(24)),
+                            FP(BlockBulkCircuit(72))
+                        }
+
+RecursiveBulksFpSet :=  {
+                            FP(RecursiveBulksCircuit(1)), ..., FP(RecursiveBulksCircuit(18)),
+                            FP(RecursiveBulksCircuit(36)), FP(RecursiveBulksCircuit(72)),
+                        }
+
+DepthFpSet := BlockBulkFpSet UNION RecursiveBulksFpSet
+
+RecursiveBulksCircuit(n).UnitFps = {FP(BlockBulkCircuit(24)), FP(BlockBulkCircuit(72))} 
+RecursiveBulksCircuit(n).SelfFps = RecursiveBulksFpSet
+```
+
+`UnitFp(s)` and `SelfFps` are concepts from [chainark](https://github.com/lightec-xyz/chainark):
+
+* `UnitFp` or `UnitFps` (an array) is used to restrict which inner circuit is acceptable. It is created as circuit constant to its enclosing circuit, such that the value changes shall result in a different circuit.
+* `SelfFps` is used to specify a set of circuits including the `self` circuit, so that each circuit in the set could verify proofs from other circuits from the same set. That means each circuit in the set should be able to verify a proof generated by itself (in an earlier invocation). This is how we achieve recursive verification for the entire Bitcoin chain. `SelfFps` is public witness to its enclosing circuit. 
+
+Finally, `DepositTxCircuit` is in charge of generating proofs to be submitted to Ethereum for the purpose of minting `zkBTC` tokens. Among other verifications, it recursively verifies:
+
+* one `BlockChainCircuit` or `BlockChainHybridCircuit(n)` proof
+```
+DepositTxCircuit.BlockChain.UnitFps = BlockChainFpSet
+```
+* two proofs from `BlockBulkCircuit(n)` or `RecursiveBulksCircuit(n)`, one for `Transaction Depth` verification, another for `CheckPoint Depth` verification
+```
+DepositTxCircuit.BlockDepths.UnitFps = DepthFpSet
+```
+
 ### CheckPoint
 
 #### Estimating CheckPoint Depth
