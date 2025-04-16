@@ -469,11 +469,16 @@ Yet the adversary could only prove `60h/r + 25` blocks.
 Solve `60h/r + 25 >= (100mr/x + 60h)h/(r(2+h)) - allowance` for various `r`, `h` values and `(D, allowance)` combinations:
 
 $$60h/r + 25 \ge (100mr/x + 60h)h/(r(2+h)) - allowance$$
-$$ \iff (60h/r + 25 + allowance)*r*(2+h) \ge (100mr/x + 60h)h $$
-$$ \iff (60h + 25r + allowance*r)*(2+h)/h \ge (100mr/x + 60h)$$
-$$ \iff (60h + 25r + allowance*r)*2/h + 25r + allowance*r \ge 100mr/x$$
-$$ \iff 120 + 50r/h + allowance*r*2/h + 25r + allowance*r \ge 100mr/x$$
-$$ \iff x \ge 100mr/(120 + 50r/h + allowance*r*2/h + 25r + allowance*r) $$
+
+$$ \iff (60h/r + 25 + allowance) * r * (2+h) \ge (100mr/x + 60h)h $$
+
+$$ \iff (60h + 25r + allowance * r) * (2+h)/h \ge (100mr/x + 60h)$$
+
+$$ \iff (60h + 25r + allowance * r) * 2/h + 25r + allowance*r \ge 100mr/x$$
+
+$$ \iff 120 + 50r/h + allowance * r * 2/h + 25r + allowance*r \ge 100mr/x$$
+
+$$ \iff x \ge 100mr/(120 + 50r/h + allowance * r * 2/h + 25r + allowance*r) $$
 
 | r    |    h   |    D    |   allowance  |    x    |
 | :-------- | ------- | ------- | ------- | ------- |
