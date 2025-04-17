@@ -765,8 +765,28 @@ The security of chainark is, therefore, of essential importance to zkBTC. Here a
 * Circuit `FingerPrint` is used throughout the chainark library to identify circuits. Unlike some simple situations in which an outer circuit verifies a proof from an inner circuit and only needs the in-circuit verification key, we design the chainark to be capable of verifying a chain of any length. So, the basic idea is for the `RecursiveCircuit` or `HybridCircuit` to verify their proof (from an earlier proving session). Of course, they cannot use a verification key when its definition has not yet been finished. `FingerPrint` is the answer to this dilemma. In the source code, this is the `MultiRecursiveCircuit.SelfFps` or `HybridCircuit.SelfFps` (an array).
 * For any circuit to verify if a proof from the `RecursiveCircuit` or `HybridCircuit` is acceptable, they need to verify the proof with a proper verification key and check if the recursion has been performed correctly. That is, the verification keys used to in-circuit verify other proofs must match the listed fingerprints exactly one-to-one. These listed fingerprints are used to identify which recursive or hybrid circuit could be trusted.
 
+## Proving System and Trusted Setup
+
+We use [Plonk](https://eprint.iacr.org/2019/953) as supported by [gnark](https://github.com/consensys/gnark/). Plonk is instantiated with the BN254 curve for the purpose of verification in Ethereum.
+
+We use the Aztec setup files with further re-calculation to .lsrs files. Instructions could be found in [this repo](https://github.com/lightec-xyz/plonkSetup).
+
 ## System Upgradability
 
+Full decentralization is somehow contradicting to upgradability, as a system upgrade could not be implemented without some controls. Yet, we will have to do this for reasons including:
+
+* potential security vulnerabilites newly discovered after product launch, either in the underlying library or in our implementation;
+* a new implementation which is much more efficient (10x or even more) and could greatly enhance user experiences and/or save lots of gas;
+* the ultimate upgrade from multi-sig managed address to `OP_ZKP`.
+
+We enable the upgradability in two ways:
+
+* to upgrade the ZKP module for deposit, we need to deploy a new deposit module. Then this new module takes over the ZKP verification for deposit.
+* to upgrade the ZKP module for redemption, we will have to deploy new ICP canister, Oasis smart contract and SGX enclave as they are all designed to be non-upgradable (so that even the project team cannot manipulate these confidential containers). The operator address has to be changed, which leads to asset migration.
+
+Since some users might miss the notification of chaning to a new deposit address, the old address will be supported in an admin-only way, as there might be security risks from the old modules.
+
+The control required to implement the upgradability is minimal in the sense that the admin role is only used for upgrade.
 
 ## Responsible Disclosure
 
