@@ -489,6 +489,194 @@ $$ \iff x \ge 100mr/(120 + 50r/h + allowance * r * 2/h + 25r + allowance*r) $$
 | 8 | 6 | 36 | 16 | 51 |
 | 8 | 6 | 48 | 19 | 65 |
 | 8 | 6 | 72 | 25 | 88 |
+
+(see [Appendix A](#appendix-a) for full data)
+
+`x` is at least 38. Looks fine already, and even more so considering that the fast block generation does not happen a lot.
+
+#### Limiting the Simulation
+
+While this looks exciting, what if the adversary further manipulate the timestamp of the $(tip-26)th$ block? We need this block's timestamp to compute the average block interval of the past blocks. In that case, the average interval of the past 11 blocks would be larger than the actual value, resulting in the next block's timestamp being allowed to be much larger. 
+
+We could limit the average block interval of the past 11 blocks to be within `L` minutes. In this setting, the simulated 'network adjusted time' would be much earlier than the actual timestamp, so the proven interval would be smaller. However, this does not make much difference as the main-net is generating blocks slower than 10 minutes per block.
+
+With the said limiting, the adversary could at most obtain `(L - r)*6` more minutes for the manipulated timestamp when the main-net is generating blocks every `r` minutes in average. Further, let `h`, `x` denote the same value as in the last sub-section and `m = max(D, 26)`. The manipulated interval becomes `maniputed_interval = ((2 + h)*60 + (L - r)*6)/(60h/r) = (20 + 10h + L - r)*r/10h`. The estimated checkpoint depth is `(100mr/x + 60h) * 10h / ((20 + 10h + L - r) * r)`. The adversary could prove `60h/r + 26` blocks.
+
+Solve `60h/r + 26 >= (100mr/x + 60h) * 10h / ((20 + 10h + L - r) * r) - allowance` for various `L`, `h` values and `(D, allowance)` combinations (with `r` fixed to 8):
+
+$$60h/r + 26 \ge (100mr/x + 60h) * 10h / ((20 + 10h + L - r) * r) - allowance$$
+
+$$\iff (60h + 26r + allowance * r) * (20 + 10h + L - r) \ge (100mr/x + 60h) * 10h$$
+
+$$\iff (60h + 26r + allowance * r) * (20 + 10h + L - r) / (10h) - 60h \ge 100mr/x$$
+
+$$\iff x \ge 100mr/((60h + 26r + allowance * r) * (20 + 10h + L - r) / (10h) - 60h)$$
+
+| L    |    h   |    D    |   allowance  |    x    |
+| :-------- | ------- | ------- | ------- | ------- |
+| 11 | 6 | 9 | 10 | 38 |
+| 11 | 6 | 12 | 10 | 38 |
+| 11 | 6 | 18 | 11 | 38 |
+| 11 | 6 | 24 | 13 | 36 |
+| 11 | 6 | 36 | 16 | 47 |
+| 11 | 6 | 48 | 19 | 60 |
+| 11 | 6 | 72 | 25 | 82 |
+
+(see [Appendix B](#appendix-b) for full data)
+
+We will set `L` to 11, then `x` is at least 36, which is good enough.
+
+### Defense in Depth - Replacing Chain Tip Signature with More Depth Requirements
+
+In the discussion, the chain tip's signature has become the single point of failure (SPoF). That is, if, for some reason, the ICP canister cannot sign the Bitcoin tip block, then we cannot generate proof that it is acceptable to the deployed smart contract. To overcome this hurdle, we could replace the signature with more depth requirements.
+
+Our current practice is to double the depth requirements, and update the allowance value accordingly. This is on top of the depth requirement escalation mentioned earlier.
+
+With this design, we have two new depth requirements: (D, allowance) = (48, 19), (72, 25). The hashing power requirements for the attacker are:
+```golang
+    // x >= 4800/(48 + 19 + 17) = 57.1
+    // x >= 7200/(72 + 25 + 17) = 63.2
+```
+
+## Securing Redemption
+
+### The Ethereum Light Client Protocol
+
+We use the Ethereum Light Client Protocol (LCP) to determine if the transaction to call the designated redeem function has been completed successfully and the enclosing block has been finalized. This includes the major parts:
+
+* the transaction to call the designated redeem function has been completed successfully and left some logs as receipts;
+* the transaction belongs to a block;
+* the block is an ancestor of another block, which has been finalized as being signed off by a sync committee;
+* there exists a signature chain from the genesis sync committee to the signing sync committee;
+
+By proving the above assertions, we are sure that the redeem function has been executed as expected. Then, we can extract data from the proven logs, assemble a Bitcoin transaction, and send it along with the proof to be verified and signed/executed. Note that all the information needed to assemble the Bitcoin transaction, including all the available UTXOs, is managed with the smart contract. 
+
+### opZKP
+
+Our long-term plan is to upgrade Bitcoin to support [`OP_ZKP`](https://github.com/opzkp/tea-horse). Then, we can supply Bitcoin with the transaction (inputs, outputs) and its (segregated) witness (proof). The proof serves as the spending conditions of the input UTXOs, much like a signature in a regular Bitcoin transfer transaction. Once the verification is successful, the Bitcoin network can process the transaction, and the user will get the redeemed $BTC.
+
+### MultiSig Design
+
+The interim solution is to use a two-of-three multi-sig scheme. As mentioned at the beginning of this document, we need multiple safe platforms to manage private keys such that:
+
+* Each platform is designed to safe-keep the private key in a way that it is nearly impossible to learn the content of the private key;
+* Each platform only signs the redemption transaction after a successful ZKP verification;
+* We can tolerate one of the platforms being cracked or failing without losing security or assets.
+
+And our choices are:
+
+* ICP [tECDSA](https://internetcomputer.org/docs/references/t-sigs-how-it-works/), available in a canister programmed to verify proof before signing the transaction. And the private key is never reconstructed during signing. 
+* Oasis [Sapphire](https://oasisprotocol.org/sapphire), an EVM compatible L1 based on TEE technology. The Intel SGX technology used in Oasis Sapphire can protect both the private key and the integrity of the enclave code so that no one can bypass the proof verification placed before transaction signing.
+* Intel SGX-enabled machines, similar to Oasis Sapphire, are operated by the Lightec team. SGX technology ensures that even the Lightec team cannot learn the private key content or bypass the "proof-verfication-before-signature" logic.
+
+Interested readers may refer to ICP or Oasis documents for security-related information. We will cover how we program and operate the SGX enclave.
+
+### Security of Applying SGX
+
+For a general introduction to SGX, especially about how it could secure computation, we recommend the classic paper [Intel SGX Explained](https://eprint.iacr.org/2016/086.pdf) by Victor Costan and Srinivas Devadas. 
+
+In a nutshell, an SGX enclave provides:
+
+* encrypted memory content which could be decrypted only inside the CPU and visible to its owning enclave, preventing privileged OS processes or even hardware systems (BIOS, memory controller, etc.) from accessing the confidential data;
+* program integrity such that once the program is tampered with, it is either an invalid or totally different enclave. In either case, it cannot decrypt any data encrypted by the original enclave.
+
+We are building on top of [ego](https://github.com/edgelesssys/ego), a popular Golang library to use SGX. The enclave verifies a zero-knowledge proof of a redemption transaction before signing the Bitcoin transaction with a private key it manages. The private key is initially generated by the first instance of the enclave, then exported and encrypted so that only itself or another enclave with the exact binary code could decrypt inside the enclave. Put another way, even the Lightec team cannot read the content of the private key or bypass the zkp verification to obtain a signature.
+
+Below picture outlines the interaction between client and server so that the client can retrieve the encrypted private key from server.
+![zkbtc](docs/zkbtcsgx.drawio.svg)
+
+#### Client-Server TLS Authentication
+Note that the TLS connectivity between Client and Server is bi-directionally authenticated, with pinned self-signed certificates.
+
+1.	Each of the client and server generates a TLS certificate using an Ed25519 key pair derived from the hash of its SGX Unique Key, applying SHA256 twice: `privateKey := SHA256(SHA256(UniqueKey))`
+2.	The generated certificates are then distributed to the client and server.
+3.	Both the client and server load their peer certificate for bi-directional authentication.
+
+#### Secure Secret Distribution
+
+The server should create the secret only once, and [seal](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/ecrypto#SealWithUniqueKey) it with its SGX Unique Key so that it could [unseal](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/ecrypto#Unseal) it after restarting. After that and once the secret is restored in the enclave, server is ready for the client to retrieve the secret.
+
+Once the TLS connection is established, the secret exchange process follows these steps:
+
+A. Client Generates an SGX Remote Attestation Report
+1.	The client generates a Secp256k1 key pair, again with the private key being `privateKey := SHA256(SHA256(UniqueKey))`. Note that this might fail with a negleble chance (less than $2^{-127}$), which is acceptable in our use.
+2.	The public key is used as a parameter [to generate an SGX Remote Attestation Report](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/enclave#GetRemoteReport).
+3.	The client sends the SGX report to the server.
+
+B. Server Verifies the Client’s Report and Encrypts the Secret
+1.	The server [verifies the client’s SGX Remote Attestation Report](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/enclave#VerifyRemoteReport), as well as if the Enclave Unique Id matches that of its own.
+2.	It extracts the client-side public key from the client’s report.
+3.	The server encrypts the secret according to the `ECIES` protocol, using the extracted public key and an ephemeral key pair. The underlying symmetric cipher suite is `AES128 + HMAC-SHA-256-16`.
+4.	It computes the hash of the ciphertext.
+5.	The computed hash is used as a parameter to generate the server’s SGX Remote Attestation Report.
+6.	The server sends the SGX report along with the ciphertext to the client.
+
+C. Client Verifies the Server’s Report and Decrypts the Secret
+1.	The client verifies the server’s SGX Remote Attestation Report, as well as if the Enclave Unique Id matches that of its own.
+2.	It extracts the ciphertext hash from the server’s SGX report.
+3.	The client computes the hash of the received ciphertext.
+4.	It compares the computed hash with the one extracted from the server’s SGX report.
+5.	If the hashes match, the client decrypts the ciphertext using its private key.
+6.	Finally, the client seals the secret using its SGX Unique Key.
+
+Our SGX code will be open once we complete the audit and launch the product.
+
+### The BLS Signature Verification for BLS12-381 G2
+
+The Ethereum Light Client Protocol requires this. As related library is not available when we started to develop zkBTC, we developed such circuit on our own and we had submitted a [PR to gnark](https://github.com/Consensys/gnark/pull/1040), pending audit, review and merge.
+
+## chainark
+
+In deposit and redemption, we need to prove a chain of relationship: for Bitcoin, the blocks are chained with double SHA256; for Ethereum Light Client Protocol, the sync committees are chained with BLS signature, etc. We developed [chainark](https://github.com/lightec-xyz/chainark) to prove a kind of chained relationship. Basically:
+
+* a `UnitCircuit` is a user-defined circuit that makes up the chaining;
+* a `RecursiveCircuit` either verifies two `UnitCircuit` proofs or one `RecursiveCircuit` or `HybridCircuit` proof immediately followed by a `UnitCircuit` proof;
+* a `HybridCircuit` is similar to `RecursiveCircuit`, but instead of a `UnitCircuit` proof, it verifies the chaining conditions directly. The benefit of `HybridCircuit` over `RecursiveCircuit` is saving a recursion.
+
+The security of chainark is, therefore, of essential importance to zkBTC. Here are the main design considerations:
+
+* Circuit `FingerPrint` is used throughout the chainark library to identify circuits. Unlike some simple situations in which an outer circuit verifies a proof from an inner circuit and only needs the in-circuit verification key, we design the chainark to be capable of verifying a chain of any length. So, the basic idea is for the `RecursiveCircuit` or `HybridCircuit` to verify their proof (from an earlier proving session). Of course, they cannot use a verification key when its definition has not yet been finished. `FingerPrint` is the answer to this dilemma. In the source code, this is the `MultiRecursiveCircuit.SelfFps` or `HybridCircuit.SelfFps` (an array).
+* For any circuit to verify if a proof from the `RecursiveCircuit` or `HybridCircuit` is acceptable, they need to verify the proof with a proper verification key and check if the recursion has been performed correctly. That is, the verification keys used to in-circuit verify other proofs must match the listed fingerprints exactly one-to-one. These listed fingerprints are used to identify which recursive or hybrid circuit could be trusted.
+
+## Proving System and Trusted Setup
+
+We use [Plonk](https://eprint.iacr.org/2019/953) as supported by [gnark](https://github.com/consensys/gnark/). Plonk is instantiated with the BN254 curve for the purpose of verification in Ethereum.
+
+We use the Aztec setup files with further re-calculation to .lsrs files. Instructions could be found in [this repo](https://github.com/lightec-xyz/plonkSetup).
+
+## System Upgradability
+
+Full decentralization is somehow contradicting to upgradability, as a system upgrade could not be implemented without some controls. Yet, we will have to do this for reasons including:
+
+* potential security vulnerabilites newly discovered after product launch, either in the underlying library or in our implementation;
+* a new implementation which is much more efficient (10x or even more) and could greatly enhance user experiences and/or save lots of gas;
+* the ultimate upgrade from multi-sig managed address to `OP_ZKP`.
+
+We enable the upgradability in two ways:
+
+* to upgrade the ZKP module for deposit, we need to deploy a new deposit module. Then this new module takes over the ZKP verification for deposit.
+* to upgrade the ZKP module for redemption, we will have to deploy new ICP canister, Oasis smart contract and SGX enclave as they are all designed to be non-upgradable (so that even the project team cannot manipulate these confidential containers). The operator address has to be changed, which leads to asset migration.
+
+Since some users might miss the notification of chaning to a new deposit address, the old address will be supported in an admin-only way, as there might be security risks from the old modules.
+
+The control required to implement the upgradability is minimal in the sense that the admin role is only used for upgrade.
+
+## Responsible Disclosure
+
+
+## Open Source Plan
+
+## Appendix A
+
+| r    |    h   |    D    |   allowance  |    x    |
+| :-------- | ------- | ------- | ------- | ------- |
+| 8 | 6 | 9 | 10 | 40 |
+| 8 | 6 | 12 | 10 | 40 |
+| 8 | 6 | 18 | 11 | 39 |
+| 8 | 6 | 24 | 13 | 38 |
+| 8 | 6 | 36 | 16 | 51 |
+| 8 | 6 | 48 | 19 | 65 |
+| 8 | 6 | 72 | 25 | 88 |
 | 8 | 12 | 9 | 10 | 44 |
 | 8 | 12 | 12 | 10 | 44 |
 | 8 | 12 | 18 | 11 | 43 |
@@ -651,25 +839,7 @@ $$ \iff x \ge 100mr/(120 + 50r/h + allowance * r * 2/h + 25r + allowance*r) $$
 | 9 | 576 | 48 | 19 | 83 |
 | 9 | 576 | 72 | 25 | 113 |
 
-`x` is at least 38. Looks fine already, and even more so considering that the fast block generation does not happen a lot.
-
-#### Limiting the Simulation
-
-While this looks exciting, what if the adversary further manipulate the timestamp of the $(tip-26)th$ block? We need this block's timestamp to compute the average block interval of the past blocks. In that case, the average interval of the past 11 blocks would be larger than the actual value, resulting in the next block's timestamp being allowed to be much larger. 
-
-We could limit the average block interval of the past 11 blocks to be within `L` minutes. In this setting, the simulated 'network adjusted time' would be much earlier than the actual timestamp, so the proven interval would be smaller. However, this does not make much difference as the main-net is generating blocks slower than 10 minutes per block.
-
-With the said limiting, the adversary could at most obtain `(L - r)*6` more minutes for the manipulated timestamp when the main-net is generating blocks every `r` minutes in average. Further, let `h`, `x` denote the same value as in the last sub-section and `m = max(D, 26)`. The manipulated interval becomes `maniputed_interval = ((2 + h)*60 + (L - r)*6)/(60h/r) = (20 + 10h + L - r)*r/10h`. The estimated checkpoint depth is `(100mr/x + 60h) * 10h / ((20 + 10h + L - r) * r)`. The adversary could prove `60h/r + 26` blocks.
-
-Solve `60h/r + 26 >= (100mr/x + 60h) * 10h / ((20 + 10h + L - r) * r) - allowance` for various `L`, `h` values and `(D, allowance)` combinations (with `r` fixed to 8):
-
-$$60h/r + 26 \ge (100mr/x + 60h) * 10h / ((20 + 10h + L - r) * r) - allowance$$
-
-$$\iff (60h + 26r + allowance * r) * (20 + 10h + L - r) \ge (100mr/x + 60h) * 10h$$
-
-$$\iff (60h + 26r + allowance * r) * (20 + 10h + L - r) / (10h) - 60h \ge 100mr/x$$
-
-$$\iff x \ge 100mr/((60h + 26r + allowance * r) * (20 + 10h + L - r) / (10h) - 60h)$$
+## Appendix B
 
 | L    |    h   |    D    |   allowance  |    x    |
 | :-------- | ------- | ------- | ------- | ------- |
@@ -926,144 +1096,3 @@ $$\iff x \ge 100mr/((60h + 26r + allowance * r) * (20 + 10h + L - r) / (10h) - 6
 | 15 | 576 | 48 | 19 | 73 |
 | 15 | 576 | 72 | 25 | 100 |
 
-We will set `L` to 11, then `x` is at least 36, which is good enough.
-
-### Defense in Depth - Replacing Chain Tip Signature with More Depth Requirements
-
-In the discussion, the chain tip's signature has become the single point of failure (SPoF). That is, if, for some reason, the ICP canister cannot sign the Bitcoin tip block, then we cannot generate proof that it is acceptable to the deployed smart contract. To overcome this hurdle, we could replace the signature with more depth requirements.
-
-Our current practice is to double the depth requirements, and update the allowance value accordingly. This is on top of the depth requirement escalation mentioned earlier.
-
-With this design, we have two new depth requirements: (D, allowance) = (48, 19), (72, 25). The hashing power requirements for the attacker are:
-```golang
-    // x >= 4800/(48 + 19 + 17) = 57.1
-    // x >= 7200/(72 + 25 + 17) = 63.2
-```
-
-## Securing Redemption
-
-### The Ethereum Light Client Protocol
-
-We use the Ethereum Light Client Protocol (LCP) to determine if the transaction to call the designated redeem function has been completed successfully and the enclosing block has been finalized. This includes the major parts:
-
-* the transaction to call the designated redeem function has been completed successfully and left some logs as receipts;
-* the transaction belongs to a block;
-* the block is an ancestor of another block, which has been finalized as being signed off by a sync committee;
-* there exists a signature chain from the genesis sync committee to the signing sync committee;
-
-By proving the above assertions, we are sure that the redeem function has been executed as expected. Then, we can extract data from the proven logs, assemble a Bitcoin transaction, and send it along with the proof to be verified and signed/executed. Note that all the information needed to assemble the Bitcoin transaction, including all the available UTXOs, is managed with the smart contract. 
-
-### opZKP
-
-Our long-term plan is to upgrade Bitcoin to support [`OP_ZKP`](https://github.com/opzkp/tea-horse). Then, we can supply Bitcoin with the transaction (inputs, outputs) and its (segregated) witness (proof). The proof serves as the spending conditions of the input UTXOs, much like a signature in a regular Bitcoin transfer transaction. Once the verification is successful, the Bitcoin network can process the transaction, and the user will get the redeemed $BTC.
-
-### MultiSig Design
-
-The interim solution is to use a two-of-three multi-sig scheme. As mentioned at the beginning of this document, we need multiple safe platforms to manage private keys such that:
-
-* Each platform is designed to safe-keep the private key in a way that it is nearly impossible to learn the content of the private key;
-* Each platform only signs the redemption transaction after a successful ZKP verification;
-* We can tolerate one of the platforms being cracked or failing without losing security or assets.
-
-And our choices are:
-
-* ICP [tECDSA](https://internetcomputer.org/docs/references/t-sigs-how-it-works/), available in a canister programmed to verify proof before signing the transaction. And the private key is never reconstructed during signing. 
-* Oasis [Sapphire](https://oasisprotocol.org/sapphire), an EVM compatible L1 based on TEE technology. The Intel SGX technology used in Oasis Sapphire can protect both the private key and the integrity of the enclave code so that no one can bypass the proof verification placed before transaction signing.
-* Intel SGX-enabled machines, similar to Oasis Sapphire, are operated by the Lightec team. SGX technology ensures that even the Lightec team cannot learn the private key content or bypass the "proof-verfication-before-signature" logic.
-
-Interested readers may refer to ICP or Oasis documents for security-related information. We will cover how we program and operate the SGX enclave.
-
-### Security of Applying SGX
-
-For a general introduction to SGX, especially about how it could secure computation, we recommend the classic paper [Intel SGX Explained](https://eprint.iacr.org/2016/086.pdf) by Victor Costan and Srinivas Devadas. 
-
-In a nutshell, an SGX enclave provides:
-
-* encrypted memory content which could be decrypted only inside the CPU and visible to its owning enclave, preventing privileged OS processes or even hardware systems (BIOS, memory controller, etc.) from accessing the confidential data;
-* program integrity such that once the program is tampered with, it is either an invalid or totally different enclave. In either case, it cannot decrypt any data encrypted by the original enclave.
-
-We are building on top of [ego](https://github.com/edgelesssys/ego), a popular Golang library to use SGX. The enclave verifies a zero-knowledge proof of a redemption transaction before signing the Bitcoin transaction with a private key it manages. The private key is initially generated by the first instance of the enclave, then exported and encrypted so that only itself or another enclave with the exact binary code could decrypt inside the enclave. Put another way, even the Lightec team cannot read the content of the private key or bypass the zkp verification to obtain a signature.
-
-Below picture outlines the interaction between client and server so that the client can retrieve the encrypted private key from server.
-![zkbtc](docs/zkbtcsgx.drawio.svg)
-
-#### Client-Server TLS Authentication
-Note that the TLS connectivity between Client and Server is bi-directionally authenticated, with pinned self-signed certificates.
-
-1.	Each of the client and server generates a TLS certificate using an Ed25519 key pair derived from the hash of its SGX Unique Key, applying SHA256 twice: `privateKey := SHA256(SHA256(UniqueKey))`
-2.	The generated certificates are then distributed to the client and server.
-3.	Both the client and server load their peer certificate for bi-directional authentication.
-
-#### Secure Secret Distribution
-
-The server should create the secret only once, and [seal](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/ecrypto#SealWithUniqueKey) it with its SGX Unique Key so that it could [unseal](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/ecrypto#Unseal) it after restarting. After that and once the secret is restored in the enclave, server is ready for the client to retrieve the secret.
-
-Once the TLS connection is established, the secret exchange process follows these steps:
-
-A. Client Generates an SGX Remote Attestation Report
-1.	The client generates a Secp256k1 key pair, again with the private key being `privateKey := SHA256(SHA256(UniqueKey))`. Note that this might fail with a negleble chance (less than $2^{-127}$), which is acceptable in our use.
-2.	The public key is used as a parameter [to generate an SGX Remote Attestation Report](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/enclave#GetRemoteReport).
-3.	The client sends the SGX report to the server.
-
-B. Server Verifies the Client’s Report and Encrypts the Secret
-1.	The server [verifies the client’s SGX Remote Attestation Report](https://pkg.go.dev/github.com/edgelesssys/ego@v1.7.0/enclave#VerifyRemoteReport), as well as if the Enclave Unique Id matches that of its own.
-2.	It extracts the client-side public key from the client’s report.
-3.	The server encrypts the secret according to the `ECIES` protocol, using the extracted public key and an ephemeral key pair. The underlying symmetric cipher suite is `AES128 + HMAC-SHA-256-16`.
-4.	It computes the hash of the ciphertext.
-5.	The computed hash is used as a parameter to generate the server’s SGX Remote Attestation Report.
-6.	The server sends the SGX report along with the ciphertext to the client.
-
-C. Client Verifies the Server’s Report and Decrypts the Secret
-1.	The client verifies the server’s SGX Remote Attestation Report, as well as if the Enclave Unique Id matches that of its own.
-2.	It extracts the ciphertext hash from the server’s SGX report.
-3.	The client computes the hash of the received ciphertext.
-4.	It compares the computed hash with the one extracted from the server’s SGX report.
-5.	If the hashes match, the client decrypts the ciphertext using its private key.
-6.	Finally, the client seals the secret using its SGX Unique Key.
-
-Our SGX code will be open once we complete the audit and launch the product.
-
-### The BLS Signature Verification for BLS12-381 G2
-
-The Ethereum Light Client Protocol requires this. As related library is not available when we started to develop zkBTC, we developed such circuit on our own and we had submitted a [PR to gnark](https://github.com/Consensys/gnark/pull/1040), pending audit, review and merge.
-
-## chainark
-
-In deposit and redemption, we need to prove a chain of relationship: for Bitcoin, the blocks are chained with double SHA256; for Ethereum Light Client Protocol, the sync committees are chained with BLS signature, etc. We developed [chainark](https://github.com/lightec-xyz/chainark) to prove a kind of chained relationship. Basically:
-
-* a `UnitCircuit` is a user-defined circuit that makes up the chaining;
-* a `RecursiveCircuit` either verifies two `UnitCircuit` proofs or one `RecursiveCircuit` or `HybridCircuit` proof immediately followed by a `UnitCircuit` proof;
-* a `HybridCircuit` is similar to `RecursiveCircuit`, but instead of a `UnitCircuit` proof, it verifies the chaining conditions directly. The benefit of `HybridCircuit` over `RecursiveCircuit` is saving a recursion.
-
-The security of chainark is, therefore, of essential importance to zkBTC. Here are the main design considerations:
-
-* Circuit `FingerPrint` is used throughout the chainark library to identify circuits. Unlike some simple situations in which an outer circuit verifies a proof from an inner circuit and only needs the in-circuit verification key, we design the chainark to be capable of verifying a chain of any length. So, the basic idea is for the `RecursiveCircuit` or `HybridCircuit` to verify their proof (from an earlier proving session). Of course, they cannot use a verification key when its definition has not yet been finished. `FingerPrint` is the answer to this dilemma. In the source code, this is the `MultiRecursiveCircuit.SelfFps` or `HybridCircuit.SelfFps` (an array).
-* For any circuit to verify if a proof from the `RecursiveCircuit` or `HybridCircuit` is acceptable, they need to verify the proof with a proper verification key and check if the recursion has been performed correctly. That is, the verification keys used to in-circuit verify other proofs must match the listed fingerprints exactly one-to-one. These listed fingerprints are used to identify which recursive or hybrid circuit could be trusted.
-
-## Proving System and Trusted Setup
-
-We use [Plonk](https://eprint.iacr.org/2019/953) as supported by [gnark](https://github.com/consensys/gnark/). Plonk is instantiated with the BN254 curve for the purpose of verification in Ethereum.
-
-We use the Aztec setup files with further re-calculation to .lsrs files. Instructions could be found in [this repo](https://github.com/lightec-xyz/plonkSetup).
-
-## System Upgradability
-
-Full decentralization is somehow contradicting to upgradability, as a system upgrade could not be implemented without some controls. Yet, we will have to do this for reasons including:
-
-* potential security vulnerabilites newly discovered after product launch, either in the underlying library or in our implementation;
-* a new implementation which is much more efficient (10x or even more) and could greatly enhance user experiences and/or save lots of gas;
-* the ultimate upgrade from multi-sig managed address to `OP_ZKP`.
-
-We enable the upgradability in two ways:
-
-* to upgrade the ZKP module for deposit, we need to deploy a new deposit module. Then this new module takes over the ZKP verification for deposit.
-* to upgrade the ZKP module for redemption, we will have to deploy new ICP canister, Oasis smart contract and SGX enclave as they are all designed to be non-upgradable (so that even the project team cannot manipulate these confidential containers). The operator address has to be changed, which leads to asset migration.
-
-Since some users might miss the notification of chaning to a new deposit address, the old address will be supported in an admin-only way, as there might be security risks from the old modules.
-
-The control required to implement the upgradability is minimal in the sense that the admin role is only used for upgrade.
-
-## Responsible Disclosure
-
-
-## Open Source Plan
