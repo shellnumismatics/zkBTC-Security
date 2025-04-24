@@ -108,7 +108,7 @@ Third-party services could enhance UX since zkBTC is designed to be fully decent
 
 We have designed three defenses against potential attacks, layered in depth:
 
-* `DepositTxCircuit.SigVerif` checks if the `chain tip` (the latest block hash) is signed by a `DFinity` canister. This is the initial implementation of our long-term security design of decentralized roles signing off the `chain tip`.
+* `DepositTxCircuit.SigVerif` checks if the `chain tip` (the latest block hash) is signed by a `ICP` canister. This is the initial implementation of our long-term security design of decentralized roles signing off the `chain tip`.
 * The `Transaction Depth` check demands that each deposit transaction have a certain confirmation depth. Note that the commonly recommended depth of `6` is based on on-chain verification, while in our system, it is essentially an off-chain verification. Therefore, we require at least `9` for small deposits and even deeper for large deposits.
 * The `CheckPoint Depth` check demands that the enclosing block for each transaction is one of the descendants of a certain recognized `CheckPoint` (also a Bitcoin block hash).
 
@@ -122,10 +122,10 @@ depth circuits proves that BlockM is ancestor of BlockN, and prove that the dept
 
 **note:** The minimum depth of tx is 9, and the minimum depth of cp is 72
 
-These circuits includes 2 groups external circuits:
+These circuits includes 2 groups of external circuits:
 
-* `BlockBulkCircuit`, prove hat when the depth is 9-24 or 72.
-* `RecursiveBulksCircuit`,  prove that when the depth is > 24. RecursiveBulksCircuit is based on the BlockBulkCircuit proof with a depth of 24 or 72, and then absorbs a depth of 1-9, 18, 36, or 72, repeatedly recursing on itself.
+* `BlockBulkCircuit`, for proofs where the depth is 9-24 or 72.
+* `RecursiveBulksCircuit`,  for proofs where the depth is > 24. RecursiveBulksCircuit is based on the BlockBulkCircuit proof with a depth of 24 or 72, and then absorbs a depth of 1-9, 18, 36, or 72, recursively repeating on itself.
 
 ![depths](docs/depths.drawio.svg)
 
@@ -199,17 +199,17 @@ Detailed design ![here](docs/blockchain.drawio.svg)
 
 #### tx circuits
 
-tx circuits proves that `deposit` or `redeem` transaction is on-chain and the depth of the tx meets `the minimum tx depth`. The chain is formed from `the genesis block` to `the latest block`, meets the difficulty adjustment rules, and passes through a well-known `checkpoint block`. The genesis block is well known, and the latest block is accepted and signed by a designated `DFinity` canister.
+tx circuits proves that `deposit` or `redeem` transaction is on-chain and the depth of the tx meets `the minimum tx depth`. The chain is formed from `the genesis block` to `the latest block`, meets the difficulty adjustment rules, and passes through a well-known `checkpoint block`. The genesis block is well known, and the latest block is accepted and signed by a designated `ICP` canister.
 
 The tx circuits contain other circuit proofs and circuit components:
 
 * `BlockChainProof`, proves that a consensus chain is formed from the genesis block to the latest block.
 * `CpDepthPoof`, proves that the chain passes through the well-known checkpoint block and its depth meets the minimum cp depth.
 * `TxInBlockCircuit` and `TxDepthPoof`, prove that tx is in a block and the depth of the block on the chain meets the minimum tx depth.
-* `EcdsaSigVerif`, proves that the latest block of this chain was accepted and signed by Dfinity.
+* `EcdsaSigVerif`, proves that the latest block of this chain was accepted and signed by the ICP canister.
 * `RedeemInEthProof`, proves that the redeem tx in ETH has been finalized on the ETH chain.
 
-The tx circuits 2 external circuits:
+The tx circuits have 2 external circuits:
 
 * `DepositTxCircuit`, proves that the deposit tx in BTC has been confirmed by the specified minimum depth on the BTC chain.
 * `RedeemTxCircuit`, proves that the redeem tx in BTC has been confirmed by the specified minimum depth on the BTC chain, and prove that its previous ETH redeem tx is also finalized on the ETH chain.
@@ -340,7 +340,7 @@ What if the proof submission is purposefully delayed such that `eth_block.timest
 
 Suppose the attacker has 10% of all honest hashing power combined; on average, it has to spend at least 900 minutes (15 hours) to meet the transaction depth requirement for a small amount deposit, which requires `tx_depth` to be at least 9. Meanwhile, around 90 new blocks have been mined in the Bitcoin mainnet. The attacker would find out the checkpoint depth deficit to be 81. If the attacker has 30% of all hashing power, numbers become 300 minutes, 30 new blocks, and 21 blocks of checkpoint depth deficit. 
 
-The smart contract, however, needs to take care of block timestamp drift, proof generation time, block interval variance, time to broadcast the smart contract invocation transaction and include it in a block, etc. For example, the timestamp of any Bitcoin block might be as early as just a bit later than the median value of its past 11 blocks. That will generate 1 hour or about six blocks more than the actual depth since we use `eth_block.timestamp` to estimate the checkpoint depth. The smart contract will have to subtract 6 or more from its estimated depth so that a *legit* deposit won't be declined. We could leave some more time for various other factors, ranging from half to one hour. Thus:
+The smart contract, however, needs to take care of block timestamp drift, proof generation time, block interval variance, time to broadcast the smart contract invocation transaction and include it in a block, etc. For example, the timestamp of any Bitcoin block might be as early as just a bit later than the median value of its past 11 blocks. That will generate 1 hour or about six blocks more than the actual depth since we use `eth_block.timestamp` to estimate the checkpoint depth. The smart contract will have to subtract 6 or more from its estimated depth so that a *legitimate* deposit won't be declined. We could leave some more time for various other factors, ranging from half to one hour. Thus:
 ```
     required_minimal_depth = estimated_depth - allowance
 ```
@@ -438,7 +438,7 @@ The `tx_depth` requirement for a checkpoint candidate is set to 36 (with `allowa
     // x >= 3600/(36 + 16 + 17) = 52.2
 ```
 
-Note that we include the 4.8 free depth from the rare situation, and the 12 free depth is also not easy to obtain for the adversary. So the above numbers are for the worse case. The actual safety margin is better. For example, we might consider when the free depth is at most 6 instead of 17 for `(D, allowance) = (9, 10), (36, 16)`:
+Note that we include the 4.8 free depth from the rare situation, and the 12 free depth is also not easy to obtain for the adversary. Therefore the above numbers are for the worse case scenario, and the actual safety margin is better. For example, we might consider when the free depth is at most 6 instead of 17 for `(D, allowance) = (9, 10), (36, 16)`:
 ```golang
     // x >= 900 /( 9 + 10 + 6) = 36.0 (compared to 25.0)
     // x >= 3600/(36 + 16 + 6) = 62.1 (compared to 52.2)
@@ -446,7 +446,7 @@ Note that we include the 4.8 free depth from the rare situation, and the 12 free
 
 #### Escalating the Depth Requirement
 
-It seems not profitable to spend at least 25% of all total-net hashing power just to make a fake deposit of a small amount. The attacker, however, no double will try to stuff as many transactions as possible into one block and hope to deposit all of them successfully.
+It seems not profitable to spend at least 25% of all total-net hashing power just to make a fake deposit of a small amount. The attacker, however, will certainly try to consolidate as many transactions as possible into one block and hope to deposit all of them successfully.
 
 To counter this measure, we keep the count of deposit transactions per block and escalate the depth requirement once a certain limit is reached.
 
@@ -496,7 +496,7 @@ $$ \iff x \ge 100mr/(120 + 50r/h + allowance * r * 2/h + 25r + allowance*r) $$
 
 #### Limiting the Simulation
 
-While this looks exciting, what if the adversary further manipulate the timestamp of the $(tip-25)-th$ block? We need this block's timestamp to compute the average block interval of the past blocks. In that case, the average interval of the past 11 blocks would be larger than the actual value, resulting in the next block's timestamp being allowed to be much larger. 
+While this looks exciting, what if the adversary further manipulates the timestamp of the $(tip-25)-th$ block? We need this block's timestamp to compute the average block interval of the past blocks. In that case, the average interval of the past 11 blocks would be larger than the actual value, resulting in the next block's timestamp being allowed to be much larger. 
 
 We could limit the average block interval of the past 11 blocks to be within `L` minutes. In this setting, the simulated 'network adjusted time' would be much earlier than the actual timestamp, so the proven interval would be smaller. However, this does not make much difference as the mainnet is generating blocks slower than 10 minutes per block.
 
